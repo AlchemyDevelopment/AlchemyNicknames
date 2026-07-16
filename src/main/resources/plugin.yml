@@ -5,6 +5,7 @@ api-version: '1.21'
 prefix: 'AlchemyPersona'
 description: Unified cosmetics and player persona plugin for the Alchemy series.
 authors: [ Plunk, Antigravity ]
+load: POSTWORLD
 softdepend: [ PlaceholderAPI, LuckPerms, Nexo, InteractiveChat ]
 
 commands:
@@ -119,8 +120,3 @@ permissions:
     description: Legacy permission for join message GUI
     children:
       alchemypersona.joinmessages: true
-
-  AlchemyPersona.admin:
-    description: Legacy admin permission used in earlier pin module versions
-    children:
-      alchemypersona.admin: true

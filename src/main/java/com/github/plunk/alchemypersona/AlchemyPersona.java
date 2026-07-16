@@ -82,6 +82,8 @@ public class AlchemyPersona extends JavaPlugin {
 
         loadModuleConfigs();
 
+        getLogger().info("AlchemyPersona enable sequence started...");
+
         linkManager = new LinkManager(this);
 
         nicknameManager = new NicknameManager(this);
@@ -91,20 +93,6 @@ public class AlchemyPersona extends JavaPlugin {
         registerLinkCommand();
         getServer().getPluginManager().registerEvents(new PlayerListener(this, nicknameManager), this);
 
-        startWebServer();
-
-        // Expire game sessions every 5 min
-        getServer().getScheduler().runTaskTimerAsynchronously(this,
-            () -> sessions.entrySet().removeIf(e -> System.currentTimeMillis() > e.getValue().expiresAt()),
-            6000L, 6000L);
-        // Expire Discord sessions, link codes, and stale OAuth states hourly
-        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
-            long now = System.currentTimeMillis();
-            discordSessions.entrySet().removeIf(e -> now > e.getValue().expiresAt());
-            linkCodes.entrySet().removeIf(e -> now > e.getValue().expiresAt());
-            oauthStates.entrySet().removeIf(e -> now > e.getValue());
-        }, 72000L, 72000L);
-
         // 2. Pins
         if (getServer().getPluginManager().getPlugin("LuckPerms") != null) {
             this.pinManager = new PinManager(this);
@@ -113,6 +101,7 @@ public class AlchemyPersona extends JavaPlugin {
             getCommand("pins").setExecutor(pinsExecutor);
             getCommand("pins").setTabCompleter(pinsExecutor);
             getServer().getPluginManager().registerEvents(pinsMenuManager, this);
+            getLogger().info("Pins module initialized.");
         }
 
         // 3. Tags
@@ -125,8 +114,14 @@ public class AlchemyPersona extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
             new com.github.plunk.alchemypersona.tags.listeners.TagListener(this, tagManager), this);
         getServer().getPluginManager().registerEvents(tagsMenuManager, this);
-        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            new PersonaExpansion(this).register();
+        getLogger().info("Tags module initialized.");
+
+        if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            boolean registered = new PersonaExpansion(this).register();
+            if (registered) getLogger().info("PersonaExpansion registered with PlaceholderAPI.");
+            else getLogger().warning("PersonaExpansion FAILED to register with PlaceholderAPI!");
+        } else {
+            getLogger().info("PlaceholderAPI not found or not enabled yet.");
         }
 
         // 4. Join Messages
@@ -142,12 +137,31 @@ public class AlchemyPersona extends JavaPlugin {
             new com.github.plunk.alchemypersona.joinmessages.commands.CommandAlchemyJoinMessages(this);
         getCommand("alchemyjoinmessages").setExecutor(ajmHandler);
         getCommand("alchemyjoinmessages").setTabCompleter(ajmHandler);
+        getLogger().info("Join Messages module initialized.");
 
-        loadNexoGlyphs();
+        getLogger().info("Synchronous enable sequence complete. Scheduling delayed tasks...");
 
-        loadSessions();
+        getServer().getScheduler().runTask(this, () -> {
+            getLogger().info("Delayed initialization task started...");
+            startWebServer();
 
-        getLogger().info("AlchemyPersona v" + getDescription().getVersion() + " has been enabled!");
+            // Expire game sessions every 5 min
+            getServer().getScheduler().runTaskTimerAsynchronously(this,
+                () -> sessions.entrySet().removeIf(e -> System.currentTimeMillis() > e.getValue().expiresAt()),
+                6000L, 6000L);
+            // Expire Discord sessions, link codes, and stale OAuth states hourly
+            getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+                long now = System.currentTimeMillis();
+                discordSessions.entrySet().removeIf(e -> now > e.getValue().expiresAt());
+                linkCodes.entrySet().removeIf(e -> now > e.getValue().expiresAt());
+                oauthStates.entrySet().removeIf(e -> now > e.getValue());
+            }, 72000L, 72000L);
+
+            loadNexoGlyphs();
+            loadSessions();
+
+            getLogger().info("AlchemyPersona v" + getDescription().getVersion() + " is fully enabled and ready!");
+        });
     }
 
     // ─── Command Registration ────────────────────────────────────────────────
