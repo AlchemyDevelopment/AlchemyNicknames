@@ -30,6 +30,7 @@ public class AlchemyPersona extends JavaPlugin {
 
     // Nickname Module
     private NicknameManager nicknameManager;
+    private com.github.plunk.alchemypersona.messaging.SpigotMessagingHandler messagingHandler;
     private io.javalin.Javalin server;
     private record Session(String uuid, long expiresAt) {}
     private record DiscordSession(String discordId, long expiresAt) {}
@@ -84,6 +85,8 @@ public class AlchemyPersona extends JavaPlugin {
 
         getLogger().info("AlchemyPersona enable sequence started...");
 
+        this.messagingHandler = new com.github.plunk.alchemypersona.messaging.SpigotMessagingHandler(this);
+
         linkManager = new LinkManager(this);
 
         nicknameManager = new NicknameManager(this);
@@ -91,6 +94,7 @@ public class AlchemyPersona extends JavaPlugin {
         registerNicknameCommands();
         registerImportCommand();
         registerLinkCommand();
+        registerReloadCommand();
         getServer().getPluginManager().registerEvents(new PlayerListener(this, nicknameManager), this);
 
         // 2. Pins
@@ -143,7 +147,9 @@ public class AlchemyPersona extends JavaPlugin {
 
         getServer().getScheduler().runTask(this, () -> {
             getLogger().info("Delayed initialization task started...");
-            startWebServer();
+            if (!getConfig().getBoolean("velocity-sync.enabled", false)) {
+                startWebServer();
+            }
 
             // Expire game sessions every 5 min
             getServer().getScheduler().runTaskTimerAsynchronously(this,
@@ -182,8 +188,12 @@ public class AlchemyPersona extends JavaPlugin {
             do { token = String.format("%05d", random.nextInt(100000)); } while (sessions.containsKey(token));
             sessions.put(token, new Session(player.getUniqueId().toString(), System.currentTimeMillis() + SESSION_TTL_MS));
 
-            String editorUrl = getConfig().getString("web.editor-url", "https://plunk.github.io/AlchemyPersona");
-            String apiBase   = getConfig().getString("web.base-url", "https://stats.bloc.kz");
+            if (getConfig().getBoolean("velocity-sync.enabled", false) && messagingHandler != null) {
+                messagingHandler.registerSession(token, player.getUniqueId());
+            }
+
+            String editorUrl = getConfig().getString("web.editor-url", "https://nickname.bloc.kz");
+            String apiBase   = getConfig().getString("web.base-url", "http://204.77.4.170:8085");
             if (editorUrl.endsWith("/")) editorUrl = editorUrl.substring(0, editorUrl.length() - 1);
             if (apiBase.endsWith("/"))   apiBase   = apiBase.substring(0, apiBase.length() - 1);
             String link = editorUrl + "/?player=" + player.getName() + "&token=" + token + "&api=" + apiBase;
@@ -213,6 +223,18 @@ public class AlchemyPersona extends JavaPlugin {
         LinkPersonaCommand linkExecutor = new LinkPersonaCommand(this);
         getCommand("linkpersona").setExecutor(linkExecutor);
         getCommand("linkpersona").setTabCompleter(linkExecutor);
+    }
+
+    private void registerReloadCommand() {
+        getCommand("personareload").setExecutor((sender, command, label, args) -> {
+            if (!sender.hasPermission("alchemypersona.admin")) {
+                sender.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize("<red>You do not have permission to run this command.</red>"));
+                return true;
+            }
+            reload();
+            sender.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize("<green>AlchemyPersona configurations reloaded successfully.</green>"));
+            return true;
+        });
     }
 
     // ─── Discord OAuth helpers ───────────────────────────────────────────────
@@ -272,6 +294,10 @@ public class AlchemyPersona extends JavaPlugin {
     // ─── Web Server ──────────────────────────────────────────────────────────
 
     private void startWebServer() {
+        if (getConfig().getBoolean("velocity-sync.enabled", false)) {
+            getLogger().info("Velocity sync enabled. Local Web Server will not be started.");
+            return;
+        }
         if (server != null) return;
 
         int port = getConfig().getInt("web.port", 8085);
@@ -426,111 +452,7 @@ public class AlchemyPersona extends JavaPlugin {
         server.get("/data", ctx -> {
             java.util.UUID uuid = resolveUuid(ctx);
             if (uuid == null) return; // resolveUuid already wrote the error response
-
-            org.bukkit.OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(uuid);
-
-            net.luckperms.api.model.user.User lpUser = null;
-            var lp = getLuckPerms();
-            if (lp != null) {
-                lpUser = lp.getUserManager().getUser(uuid);
-                if (lpUser == null) lpUser = lp.getUserManager().loadUser(uuid).join();
-            }
-
-            var data = new java.util.HashMap<String, Object>();
-            data.put("playerName", offlinePlayer.getName());
-            data.put("nickname", nicknameManager.getNickname(uuid));
-
-            final net.luckperms.api.model.user.User finalLpUser = lpUser;
-            java.util.function.Predicate<String> hasPerm = perm ->
-                finalLpUser != null && finalLpUser.getCachedData().getPermissionData()
-                    .checkPermission(perm).asBoolean();
-
-            // Pins
-            var pins = new java.util.ArrayList<java.util.Map<String, Object>>();
-            try {
-                if (pinManager != null && getPinsConfig() != null) {
-                    String currentPin = null;
-                    if (offlinePlayer.isOnline()) {
-                        currentPin = pinManager.getCurrentPin(offlinePlayer.getPlayer());
-                    } else if (finalLpUser != null) {
-                        currentPin = finalLpUser.getCachedData().getMetaData().getSuffix();
-                    }
-                    var section = getPinsConfig().getConfigurationSection("pins");
-                    if (section != null) {
-                        for (String pinId : section.getKeys(false)) {
-                            var pinData = new java.util.HashMap<String, Object>();
-                            pinData.put("id", pinId);
-                            pinData.put("displayName", getPinsConfig().getString("pins." + pinId + ".display_name"));
-                            String unicode = getPinsConfig().getString("pins." + pinId + ".pin_unicode");
-                            pinData.put("unicode", unicode);
-                            String explicitTexture = getPinsConfig().getString("pins." + pinId + ".nexo_texture");
-                            if (explicitTexture != null && explicitTexture.contains(":")) {
-                                String[] parts = explicitTexture.split(":");
-                                pinData.put("imageUrl", "/api/nickname/assets/" + parts[0] + "/textures/" + parts[1] + ".png");
-                            }
-                            if (!pinData.containsKey("imageUrl") && unicode != null) {
-                                String stripped = org.bukkit.ChatColor.stripColor(
-                                    org.bukkit.ChatColor.translateAlternateColorCodes('&', unicode)).trim();
-                                if (nexoMapping.containsKey(stripped))
-                                    pinData.put("imageUrl", nexoMapping.get(stripped));
-                            }
-                            if (!pinData.containsKey("imageUrl")) {
-                                String lowerId = pinId.toLowerCase();
-                                if (nexoMapping.containsKey(lowerId))
-                                    pinData.put("imageUrl", nexoMapping.get(lowerId));
-                            }
-                            pinData.put("owned", hasPerm.test("LPP.pin." + pinId));
-                            pinData.put("selected", pinId.equals(currentPin)
-                                || (currentPin != null && currentPin.equals(unicode)));
-                            pins.add(pinData);
-                        }
-                    }
-                }
-            } catch (Exception e) { getLogger().warning("Error loading Pins for API: " + e.getMessage()); }
-            data.put("pins", pins);
-
-            // Tags
-            var tags = new java.util.ArrayList<java.util.Map<String, Object>>();
-            try {
-                if (tagManager != null && getTagsConfig() != null) {
-                    String currentTagId = tagManager.getPlayerTagId(uuid);
-                    var tagSection = getTagsConfig().getConfigurationSection("tags");
-                    if (tagSection != null) {
-                        for (String tagId : tagSection.getKeys(false)) {
-                            var tagData = new java.util.HashMap<String, Object>();
-                            tagData.put("id", tagId);
-                            tagData.put("displayName", getTagsConfig().getString("tags." + tagId + ".display_name"));
-                            tagData.put("tag", getTagsConfig().getString("tags." + tagId + ".tag"));
-                            String perm = getTagsConfig().getString("tags." + tagId + ".permission", "deluxetags.tag." + tagId);
-                            tagData.put("owned", hasPerm.test(perm));
-                            tagData.put("selected", tagId.equals(currentTagId));
-                            tags.add(tagData);
-                        }
-                    }
-                }
-            } catch (Exception e) { getLogger().warning("Error loading Tags for API: " + e.getMessage()); }
-            data.put("tags", tags);
-
-            // Join Messages
-            var jms = new java.util.ArrayList<java.util.Map<String, Object>>();
-            try {
-                if (messageManager != null) {
-                    String currentJm = com.github.plunk.alchemypersona.joinmessages.Data.get()
-                        .getString("players." + uuid);
-                    String pName = offlinePlayer.getName() != null ? offlinePlayer.getName() : "Player";
-                    for (var jm : messageManager.getLoadedMessages()) {
-                        var jmData = new java.util.HashMap<String, Object>();
-                        jmData.put("id", jm.getIdentifier());
-                        jmData.put("text", jm.getFormattedMessage(pName));
-                        jmData.put("owned", hasPerm.test(jm.getPermission()));
-                        jmData.put("selected", jm.getIdentifier().equals(currentJm));
-                        jms.add(jmData);
-                    }
-                }
-            } catch (Exception e) { getLogger().warning("Error loading Join Messages for API: " + e.getMessage()); }
-            data.put("joinMessages", jms);
-
-            ctx.json(data);
+            ctx.json(buildPersonaDataMap(uuid));
         });
 
         // ── Nexo assets ──────────────────────────────────────────────────────
@@ -674,6 +596,7 @@ public class AlchemyPersona extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (messagingHandler != null) messagingHandler.shutdown();
         if (server != null) server.stop();
         if (nicknameManager != null) nicknameManager.saveNicknames();
         saveSessions();
@@ -767,6 +690,130 @@ public class AlchemyPersona extends JavaPlugin {
     public FileConfiguration getPinsConfig()                { return pinsConfig; }
     public FileConfiguration getTagsConfig()                { return tagsConfig; }
     public FileConfiguration getJoinMessagesConfig()        { return joinMessagesConfig; }
+
+    public com.github.plunk.alchemypersona.messaging.SpigotMessagingHandler getMessagingHandler() { return messagingHandler; }
+
+    public String getJoinMessageSelection(java.util.UUID uuid) {
+        if (com.github.plunk.alchemypersona.joinmessages.Data.get() != null) {
+            String val = com.github.plunk.alchemypersona.joinmessages.Data.get().getString("players." + uuid.toString());
+            return val != null ? val : "";
+        }
+        return "";
+    }
+
+    public java.util.Map<String, Object> buildPersonaDataMap(java.util.UUID uuid) {
+        org.bukkit.OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(uuid);
+
+        net.luckperms.api.model.user.User lpUser = null;
+        try {
+            var lp = getLuckPerms();
+            if (lp != null) {
+                lpUser = lp.getUserManager().getUser(uuid);
+                if (lpUser == null) lpUser = lp.getUserManager().loadUser(uuid).join();
+            }
+        } catch (Throwable ignored) {}
+
+        var data = new java.util.HashMap<String, Object>();
+        data.put("playerName", offlinePlayer.getName() != null ? offlinePlayer.getName() : uuid.toString());
+        data.put("nickname", nicknameManager != null ? nicknameManager.getNickname(uuid) : "");
+
+        final net.luckperms.api.model.user.User finalLpUser = lpUser;
+        java.util.function.Predicate<String> hasPerm = perm -> {
+            try {
+                return finalLpUser != null && finalLpUser.getCachedData().getPermissionData()
+                    .checkPermission(perm).asBoolean();
+            } catch (Throwable e) {
+                return false;
+            }
+        };
+
+        // Pins
+        var pins = new java.util.ArrayList<java.util.Map<String, Object>>();
+        try {
+            if (pinManager != null && getPinsConfig() != null) {
+                String currentPin = null;
+                if (offlinePlayer.isOnline()) {
+                    currentPin = pinManager.getCurrentPin(offlinePlayer.getPlayer());
+                } else if (finalLpUser != null) {
+                    currentPin = finalLpUser.getCachedData().getMetaData().getSuffix();
+                }
+                var section = getPinsConfig().getConfigurationSection("pins");
+                if (section != null) {
+                    for (String pinId : section.getKeys(false)) {
+                        var pinData = new java.util.HashMap<String, Object>();
+                        pinData.put("id", pinId);
+                        pinData.put("displayName", getPinsConfig().getString("pins." + pinId + ".display_name"));
+                        String unicode = getPinsConfig().getString("pins." + pinId + ".pin_unicode");
+                        pinData.put("unicode", unicode);
+                        String explicitTexture = getPinsConfig().getString("pins." + pinId + ".nexo_texture");
+                        if (explicitTexture != null && explicitTexture.contains(":")) {
+                            String[] parts = explicitTexture.split(":");
+                            pinData.put("imageUrl", "/api/nickname/assets/" + parts[0] + "/textures/" + parts[1] + ".png");
+                        }
+                        if (!pinData.containsKey("imageUrl") && unicode != null) {
+                            String stripped = org.bukkit.ChatColor.stripColor(
+                                org.bukkit.ChatColor.translateAlternateColorCodes('&', unicode)).trim();
+                            if (nexoMapping.containsKey(stripped))
+                                pinData.put("imageUrl", nexoMapping.get(stripped));
+                        }
+                        if (!pinData.containsKey("imageUrl")) {
+                            String lowerId = pinId.toLowerCase();
+                            if (nexoMapping.containsKey(lowerId))
+                                pinData.put("imageUrl", nexoMapping.get(lowerId));
+                        }
+                        pinData.put("owned", hasPerm.test("LPP.pin." + pinId));
+                        pinData.put("selected", pinId.equals(currentPin)
+                            || (currentPin != null && currentPin.equals(unicode)));
+                        pins.add(pinData);
+                    }
+                }
+            }
+        } catch (Exception e) { getLogger().warning("Error loading Pins for API: " + e.getMessage()); }
+        data.put("pins", pins);
+
+        // Tags
+        var tags = new java.util.ArrayList<java.util.Map<String, Object>>();
+        try {
+            if (tagManager != null && getTagsConfig() != null) {
+                String currentTagId = tagManager.getPlayerTagId(uuid);
+                var tagSection = getTagsConfig().getConfigurationSection("tags");
+                if (tagSection != null) {
+                    for (String tagId : tagSection.getKeys(false)) {
+                        var tagData = new java.util.HashMap<String, Object>();
+                        tagData.put("id", tagId);
+                        tagData.put("displayName", getTagsConfig().getString("tags." + tagId + ".display_name"));
+                        tagData.put("tag", getTagsConfig().getString("tags." + tagId + ".tag"));
+                        String perm = getTagsConfig().getString("tags." + tagId + ".permission", "deluxetags.tag." + tagId);
+                        tagData.put("owned", hasPerm.test(perm));
+                        tagData.put("selected", tagId.equals(currentTagId));
+                        tags.add(tagData);
+                    }
+                }
+            }
+        } catch (Exception e) { getLogger().warning("Error loading Tags for API: " + e.getMessage()); }
+        data.put("tags", tags);
+
+        // Join Messages
+        var jms = new java.util.ArrayList<java.util.Map<String, Object>>();
+        try {
+            if (messageManager != null) {
+                String currentJm = com.github.plunk.alchemypersona.joinmessages.Data.get()
+                    .getString("players." + uuid);
+                String pName = offlinePlayer.getName() != null ? offlinePlayer.getName() : "Player";
+                for (var jm : messageManager.getLoadedMessages()) {
+                    var jmData = new java.util.HashMap<String, Object>();
+                    jmData.put("id", jm.getIdentifier());
+                    jmData.put("text", jm.getFormattedMessage(pName));
+                    jmData.put("owned", hasPerm.test(jm.getPermission()));
+                    jmData.put("selected", jm.getIdentifier().equals(currentJm));
+                    jms.add(jmData);
+                }
+            }
+        } catch (Exception e) { getLogger().warning("Error loading Join Messages for API: " + e.getMessage()); }
+        data.put("joinMessages", jms);
+
+        return data;
+    }
 
     public net.luckperms.api.LuckPerms getLuckPerms() {
         if (getServer().getPluginManager().getPlugin("LuckPerms") != null)

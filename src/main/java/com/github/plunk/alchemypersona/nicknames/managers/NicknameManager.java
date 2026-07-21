@@ -65,7 +65,25 @@ public class NicknameManager {
         }
     }
 
+    public void setNicknameInMemory(UUID uuid, String nick) {
+        if (nick == null || nick.isEmpty()) {
+            nicknames.remove(uuid);
+        } else {
+            nicknames.put(uuid, nick);
+        }
+        updatePlayer(uuid);
+    }
+
     public void setNickname(UUID uuid, String nick) {
+        if (plugin.getConfig().getBoolean("velocity-sync.enabled", false)) {
+            setNicknameInMemory(uuid, nick);
+            Player player = org.bukkit.Bukkit.getPlayer(uuid);
+            if (player != null) {
+                plugin.getMessagingHandler().updatePersona(player, nick, "", plugin.getTagManager().getPlayerTagId(uuid), plugin.getJoinMessageSelection(uuid));
+            }
+            return;
+        }
+
         if (nick == null || nick.isEmpty()) {
             nicknames.remove(uuid);
             nicknamesConfig.set(uuid.toString(), null);

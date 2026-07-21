@@ -41,6 +41,12 @@ public class LinkPersonaCommand implements CommandExecutor, TabCompleter {
         }
 
         boolean linked = plugin.getLinkManager().isLinked(player.getUniqueId());
+
+        if (plugin.getConfig().getBoolean("velocity-sync.enabled", false) && plugin.getMessagingHandler() != null) {
+            plugin.getMessagingHandler().requestLinkCode(player);
+            return true;
+        }
+
         String code = plugin.generateLinkCode(player.getUniqueId());
 
         String editorUrl = plugin.getConfig().getString("web.editor-url", "https://nickname.bloc.kz");

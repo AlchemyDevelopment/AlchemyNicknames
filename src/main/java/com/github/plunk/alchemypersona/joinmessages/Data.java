@@ -38,6 +38,16 @@ public class Data {
     public static void reload() {
         data = YamlConfiguration.loadConfiguration(file);
     }
+
+    public static void setInMemory(java.util.UUID uuid, String joinMessageId) {
+        if (data != null) {
+            if (joinMessageId == null || joinMessageId.isEmpty()) {
+                data.set("players." + uuid.toString(), null);
+            } else {
+                data.set("players." + uuid.toString(), joinMessageId);
+            }
+        }
+    }
 }
 
 

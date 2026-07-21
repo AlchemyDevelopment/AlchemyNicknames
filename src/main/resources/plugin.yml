@@ -30,6 +30,10 @@ commands:
     description: Link your Minecraft account to Discord
     usage: /linkpersona [unlink]
     permission: alchemypersona.linkpersona
+  personareload:
+    description: Reload the AlchemyPersona plugin configuration
+    usage: /personareload
+    permission: alchemypersona.admin
 
   # Pins
   pins:

@@ -9,8 +9,8 @@ messages:
 # Web API Settings (for the Persona Designer)
 web:
   port: 8085
-  # The public domain of your server (e.g. https://stats.bloc.kz)
-  base-url: "https://stats.bloc.kz"
+  # The public domain/IP of your Velocity server running the bridge
+  base-url: "http://204.77.4.170:8085"
   # The path prefix used by your proxy (e.g. AlchemyWebHub)
   proxy-prefix: "/api/nickname"
   # The URL of the Persona Designer frontend
@@ -19,7 +19,14 @@ web:
 # Discord OAuth2 Integration (for /linkpersona)
 # Create an application at https://discord.com/developers/applications
 # Add redirect URI: <base-url>/auth/discord/callback
-# (Example: https://stats.bloc.kz/api/nickname/auth/discord/callback)
+# (Example: http://204.77.4.170:8085/auth/discord/callback)
 discord:
   client-id: ""
   client-secret: ""
+
+# Velocity Sync Settings
+# Set this to true if you are running behind a Velocity proxy and want central database sync
+velocity-sync:
+  enabled: true
+  websocket-url: "ws://204.77.4.170:9090"
+  secret-token: "my_secret_token_here"

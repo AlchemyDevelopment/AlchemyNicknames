@@ -2,8 +2,6 @@ package com.github.plunk.alchemypersona.tags.managers;
 
 import com.github.plunk.alchemypersona.AlchemyPersona;
 import com.github.plunk.alchemypersona.tags.utils.ColorUtils;
-import net.luckperms.api.LuckPerms;
-import net.luckperms.api.node.Node;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -68,8 +66,26 @@ public class TagManager {
      * Sets a player's active tag.
      * Stores in memory AND persists to file.
      */
+    public void setTagInMemory(UUID uuid, String tagId) {
+        if (tagId == null || tagId.isEmpty()) {
+            playerTags.remove(uuid);
+        } else {
+            playerTags.put(uuid, tagId);
+        }
+    }
+
+    /**
+     * Sets a player's active tag.
+     * Stores in memory AND persists to file.
+     */
     public void setTag(Player player, String tagId) {
         UUID uuid = player.getUniqueId();
+
+        if (plugin.getConfig().getBoolean("velocity-sync.enabled", false)) {
+            setTagInMemory(uuid, tagId);
+            plugin.getMessagingHandler().updatePersona(player, plugin.getNicknameManager().getNickname(uuid), "", tagId, plugin.getJoinMessageSelection(uuid));
+            return;
+        }
 
         // Update memory
         playerTags.put(uuid, tagId);
@@ -84,6 +100,12 @@ public class TagManager {
      */
     public void clearTag(Player player) {
         UUID uuid = player.getUniqueId();
+
+        if (plugin.getConfig().getBoolean("velocity-sync.enabled", false)) {
+            setTagInMemory(uuid, null);
+            plugin.getMessagingHandler().updatePersona(player, plugin.getNicknameManager().getNickname(uuid), "", "", plugin.getJoinMessageSelection(uuid));
+            return;
+        }
 
         // Update memory
         playerTags.remove(uuid);
@@ -171,16 +193,11 @@ public class TagManager {
                     .replace("%name%", tagId);
         }
 
-        LuckPerms lp = plugin.getLuckPerms();
-        if (lp == null) {
+        if (Bukkit.getPluginManager().getPlugin("LuckPerms") == null) {
             return CompletableFuture.completedFuture(false);
         }
 
-        String finalPermission = permission;
-        return lp.getUserManager().modifyUser(player.getUniqueId(), user -> {
-            Node node = Node.builder(finalPermission).build();
-            user.data().add(node);
-        }).thenApply(v -> true);
+        return LuckPermsHook.grantTagPermission(plugin, player, permission);
     }
 
     /**

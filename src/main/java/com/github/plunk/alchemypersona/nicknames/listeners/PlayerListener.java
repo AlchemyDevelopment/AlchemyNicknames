@@ -22,8 +22,14 @@ public class PlayerListener implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent event) {
-        // We no longer set the display name directly to avoid overwriting prefixes/suffixes.
-        // Nicknames should be displayed using the %AlchemyPersona_displayname% placeholder.
+        if (plugin.getConfig().getBoolean("velocity-sync.enabled", false)) {
+            // Delay slightly to ensure player is fully registered on proxy/channel
+            org.bukkit.Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (event.getPlayer().isOnline()) {
+                    plugin.getMessagingHandler().requestPersona(event.getPlayer());
+                }
+            }, 5L);
+        }
     }
 
     // Removed onChat renderer to prevent interference with dedicated chat plugins.
