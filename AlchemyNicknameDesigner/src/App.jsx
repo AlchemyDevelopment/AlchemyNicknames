@@ -95,7 +95,9 @@ function Toast({ message, type = 'success', onDone }) {
 // ─── DiscordButton ────────────────────────────────────────────────────────────
 
 function DiscordButton({ apiBase, label = 'Login with Discord' }) {
-  const url = `${apiBase}/api/nickname/auth/discord`;
+  const clientId = '1497614113075892244';
+  const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
+  const url = `https://discord.com/api/oauth2/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=identify`;
   return (
     <a
       href={url}
@@ -355,41 +357,66 @@ function App() {
   };
 
   useEffect(() => {
-    const params   = new URLSearchParams(window.location.search);
-    const player   = params.get('player')   || '';
-    const token    = params.get('token')    || '';
-    const apiParam = params.get('api')      || '';
-    const dsession = params.get('dsession') || getStoredDiscordSession();
-    const errorFlag = params.get('error')  || '';
+    const initAuth = async () => {
+      const params   = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const accessToken = hashParams.get('access_token');
+      
+      const player   = params.get('player')   || '';
+      const token    = params.get('token')    || '';
+      const apiParam = params.get('api')      || '';
+      let dsession = params.get('dsession') || getStoredDiscordSession();
+      const errorFlag = params.get('error')  || '';
 
-    const resolved = resolveApi(apiParam);
-    if (apiParam) setStoredApiBase(apiParam);
-    setApiBase(resolved);
+      const resolved = resolveApi(apiParam);
+      if (apiParam) setStoredApiBase(apiParam);
+      setApiBase(resolved);
 
-    if (window.history.replaceState) {
-      window.history.replaceState({}, '', window.location.pathname);
-    }
+      if (window.history.replaceState) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
 
-    if (errorFlag) {
-      const msgs = {
-        oauth_failed: 'Discord login failed. Please try again.',
-        link_expired: 'Link request expired. Please run /linkpersona again.',
-      };
-      setToast({ message: msgs[errorFlag] || 'An error occurred.', type: 'error' });
-      return;
-    }
+      if (accessToken) {
+        try {
+          setIsLoading(true);
+          const userRes = await fetch('https://discord.com/api/v10/users/@me', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          if (userRes.ok) {
+            const user = await userRes.json();
+            dsession = user.id;
+            setStoredDiscordSession(dsession);
+          }
+        } catch (e) {
+          console.error('Failed to fetch Discord user profile:', e);
+        } finally {
+          setIsLoading(false);
+        }
+      }
 
-    if (dsession) {
-      if (params.get('dsession')) setStoredDiscordSession(dsession);
-      handleDiscordSession(dsession, resolved);
-      return;
-    }
+      if (errorFlag) {
+        const msgs = {
+          oauth_failed: 'Discord login failed. Please try again.',
+          link_expired: 'Link request expired. Please run /linkpersona again.',
+        };
+        setToast({ message: msgs[errorFlag] || 'An error occurred.', type: 'error' });
+        return;
+      }
 
-    if (player && token) {
-      const info = { name: player, token, apiBase: resolved };
-      setPlayerInfo(info);
-      fetchPersonaData(info);
-    }
+      if (dsession) {
+        if (params.get('dsession')) setStoredDiscordSession(dsession);
+        handleDiscordSession(dsession, resolved);
+        return;
+      }
+
+      if (player && token) {
+        const info = { name: player, token, apiBase: resolved };
+        setPlayerInfo(info);
+        fetchPersonaData(info);
+      }
+    };
+
+    initAuth();
   }, []);
 
   const handleDiscordSession = async (dsession, base) => {
@@ -399,7 +426,7 @@ function App() {
     }
     setIsLoading(true);
     try {
-      const res = await fetch(`${base}/api/nickname/accounts?dsession=${dsession}`);
+      const res = await fetch(`${base}/api/nickname/accounts?discordId=${dsession}&dsession=${dsession}`);
       if (!res.ok) { 
         setStoredDiscordSession(null);
         setToast({ message: 'Discord session invalid or expired.', type: 'error' }); 
@@ -423,7 +450,7 @@ function App() {
   };
 
   const openDiscordEditor = (session, acc) => {
-    const info = { name: acc.name, uuid: acc.uuid, dsession: session.dsession, apiBase: session.apiBase };
+    const info = { name: acc.name, uuid: acc.uuid, dsession: session.dsession, discordId: session.dsession, apiBase: session.apiBase };
     setPlayerInfo(info);
     fetchPersonaData(info);
   };
