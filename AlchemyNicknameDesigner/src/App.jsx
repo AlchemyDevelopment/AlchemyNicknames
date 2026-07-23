@@ -24,6 +24,15 @@ function setStoredDiscordSession(v) {
 function resolveApi(param) {
   return param || BUILT_IN_API || getStoredApiBase();
 }
+function buildApiUrl(base, path) {
+  if (!base) return '';
+  const cleanBase = base.replace(/\/+$/, '');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (cleanBase.endsWith('/persona') || cleanBase.endsWith('/api/nickname')) {
+    return cleanBase + cleanPath;
+  }
+  return cleanBase + '/persona' + cleanPath;
+}
 
 function stripTags(nick) {
   if (!nick) return '';
@@ -125,7 +134,7 @@ function LinkCodeEntry({ dsession, apiBase, onLinked }) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${apiBase}/api/nickname/link-code`, {
+      const res = await fetch(buildApiUrl(apiBase, '/link-code'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dsession, code: code.trim().toUpperCase() })
@@ -344,10 +353,10 @@ function App() {
     if (!info?.apiBase) return;
     setIsLoading(true);
     try {
-      const url = info.dsession
-        ? `${info.apiBase}/api/nickname/data?dsession=${info.dsession}&uuid=${info.uuid}`
-        : `${info.apiBase}/api/nickname/data?token=${info.token}`;
-      const res = await fetch(url);
+      const path = info.dsession
+        ? `/data?dsession=${info.dsession}&uuid=${info.uuid}`
+        : `/data?token=${info.token}`;
+      const res = await fetch(buildApiUrl(info.apiBase, path));
       if (res.ok) setPersonaData(await res.json());
     } catch (e) {
       console.error('Failed to fetch persona data:', e);
@@ -426,7 +435,7 @@ function App() {
     }
     setIsLoading(true);
     try {
-      const res = await fetch(`${base}/api/nickname/accounts?discordId=${dsession}&dsession=${dsession}`);
+      const res = await fetch(buildApiUrl(base, `/accounts?discordId=${dsession}&dsession=${dsession}`));
       if (!res.ok) { 
         setStoredDiscordSession(null);
         setToast({ message: 'Discord session invalid or expired.', type: 'error' }); 
@@ -467,7 +476,7 @@ function App() {
       ? { dsession: playerInfo.dsession, uuid: playerInfo.uuid, [type]: id }
       : { token: playerInfo.token, [type]: id };
     try {
-      const res = await fetch(`${playerInfo.apiBase}/api/nickname/save`, {
+      const res = await fetch(buildApiUrl(playerInfo.apiBase, '/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
